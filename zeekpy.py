@@ -89,7 +89,7 @@ __all__ = [
 
 def load_json_msg(buf: bytes | str) -> tuple[str, str, RawArgs]:
     """
-    Given a raw WebSocketm mesage, unpack it into topic, event name and
+    Given a raw WebSocket message, unpack it into topic, event name and
     args. args is just the Python list and dict objects from the parsed JSON.
     """
     try:
@@ -107,7 +107,7 @@ def load_json_msg(buf: bytes | str) -> tuple[str, str, RawArgs]:
         raise ValueError(f"top-level type is {ty!r}, not data-message")
 
     if msg["@data-type"] != "vector":
-        t = msg["data-type"]
+        t = msg["@data-type"]
         raise ValueError(f"top-level @data-type is {t!r}, not vector")
 
     if data[0]["data"] != 1:  # proto version
@@ -352,10 +352,7 @@ class Zeek:
 
     Register event handlers using on() method.
 
-    Publish events to Zeek using using publish().
-
-    Args:
-        uri: Zeek's WebSocket endpoint, defaults to ws://127.0.0.1:27759/v1/messages/json
+    Publish events to Zeek using publish().
     """
 
     def __init__(

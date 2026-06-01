@@ -1,13 +1,19 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "zeekpy"
-version = "0.1.0"
+dynamic = ["version"]
+description = "Async-less library for consuming and publishing events via Zeek's WebSocket API"
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.11"
 dependencies = [
     "websockets>=15.0",
 ]
 
 [tool.setuptools]
 py-modules = ["zeekpy"]
+
+[tool.setuptools_scm]
