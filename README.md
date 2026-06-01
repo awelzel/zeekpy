@@ -9,18 +9,22 @@ Usage
 -----
 
 You construct a zeekpy.Zeek object, passing it the WebSocket URI of the Zeek
-cluster to connect to and the topics to which to subscribe. The WebSocket
-connection and handshake is done when entering the object's context manager.
+cluster to connect to and the optional topics to which to subscribe to.
+The WebSocket connection and Zeek handshake is done when entering the Zeek
+object's context manager:
 
-    with Zeek("ws://127.0.0.1:27759/v1/messages/json", ["/test/"]) as zeek:
+    zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
+
+    with zeek:
+        # Now connected to Zeek and subscribed to /test/test
         ...
 
 To handle events, you implement handler functions that have appropriate type
-annotations. You use types listed in the EventArg union in this module.
+annotations. You use the types listed in the EventArg union in this module.
 
 For example, to register a handler function for the NetControl::pubsub_add_rules
 event that receives a topic string, a pubsub_id that's a count and a vector of
-Rule records, the Python looks like:
+Rule records, the Python code looks like:
 
     import dataclasses
     from zeekpy import Zeek, addr, count
@@ -29,8 +33,9 @@ Rule records, the Python looks like:
     class Rule:
         a: addr
         c: count
+        comment: None | str = None
 
-    zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", ["/test/"])
+    zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
 
     @zeek.on("NetControl::pubsub_add_rules")
     def handle_pubsub_add_rules(topic: str, pubsub_id: count, rules: list[Rule]):
@@ -43,7 +48,7 @@ Rule records, the Python looks like:
 Publishing Events
 -----------------
 
-Use Zeek.publish() to publish events into the Zeek cluster. If an argument is
+Use Zeek.publish() to publish Zeek events to a topic. If an event argument is
 of a type that's in EventArg, it's serialized properly (think count, enum or port).
 If an argument is a dict and has only "@data-type" and "data" keys, it is used
 directly in the JSON payload. To publish a Python int as a Zeek count, you need
@@ -55,7 +60,7 @@ it: enum("NetControl::DROP").
     # Zeek event declaration:
     # global ev: event(c: count);
 
-    with Zeek("ws://127.0.0.1:27759/v1/messages/json", ["/test/"]) as zeek:
+    with Zeek("ws://127.0.0.1:27759/v1/messages/json") as zeek:
         zeek.publish("/the/topic/", "ev", [count(42)])
 
 
@@ -76,24 +81,28 @@ to instantiate and populate instances based on the listed fields. For &optional,
 use typing.Optional or the type | None notation. A fairly complex example of a
 vector of records containing optional fields follows:
 
-    # The Zeek side:
-    type R: {
-        c: count;
-        a: addr;
-        oa: addr &optional;
-        f: double &optional;
-    }
+    # Zeek type and event declaration:
+    # type R: {
+    #     c: count;
+    #     a: addr;
+    #     oa: addr &optional;
+    #     f: double &optional;
+    # }
+    #
+    # global ev: event(rvec: vector of R);
+    from zeekpy import Zeek, addr, count
 
-    global ev: event(rvec: vector of R);
 
-    # The Python side:
+    # Python type declaration for R.
     @dataclasses.dataclass
     class R:
         c: count
         a: addr
-        oa: addr | None = None  # optional
-        f: float | None = None  # optional
+        oa: addr | None = None
+        f: float | None = None
 
+
+    # Usage
     zeek = Zeek(...)
 
     @zeek.on("ev")
