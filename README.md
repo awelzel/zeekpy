@@ -2,8 +2,8 @@ zeekpy
 ======
 
 A little pure Python and async-less library for consuming and publishing
-Zeek events events via Zeek's WebSocket API, leveraging Python type
-annotations for conversion purposes.
+Zeek events via Zeek's WebSocket API, leveraging Python type annotations
+for conversion purposes.
 
 Usage
 -----
@@ -13,36 +13,40 @@ cluster to connect to and the optional topics to which to subscribe to.
 The WebSocket connection and Zeek handshake is done when entering the Zeek
 object's context manager:
 
-    zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
+```python
+zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
 
-    with zeek:
-        # Now connected to Zeek and subscribed to /test/test
-        ...
+with zeek:
+    # Now connected to Zeek and subscribed to /test/test
+    ...
+```
 
-To handle events, you implement handler functions that have appropriate type
-annotations. You use the types listed in the EventArg union in this module.
+To handle events, you implement handler functions that have appropriate type annotations.
+You use the types listed in the EventArg union in the zeekpy module.
 
 For example, to register a handler function for the NetControl::pubsub_add_rules
 event that receives a topic string, a pubsub_id that's a count and a vector of
 Rule records, the Python code looks like:
 
-    import dataclasses
-    from zeekpy import Zeek, addr, count
+```python
+import dataclasses
+from zeekpy import Zeek, addr, count
 
-    @dataclasses.dataclass
-    class Rule:
-        a: addr
-        c: count
-        comment: None | str = None
+@dataclasses.dataclass
+class Rule:
+    a: addr
+    c: count
+    comment: None | str = None
 
-    zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
+zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
 
-    @zeek.on("NetControl::pubsub_add_rules")
-    def handle_pubsub_add_rules(topic: str, pubsub_id: count, rules: list[Rule]):
-        print(topic, pubsub_id, rules)
+@zeek.on("NetControl::pubsub_add_rules")
+def handle_pubsub_add_rules(topic: str, pubsub_id: count, rules: list[Rule]):
+    print(topic, pubsub_id, rules)
 
-    with zeek:
-        zeek.consume()
+with zeek:
+    zeek.consume()
+```
 
 
 Publishing Events
@@ -57,12 +61,14 @@ as an integer. This is similar to the ZeekJS BigInt case. Similarly, for enum,
 the library treats an enum like a str. For publishing a string as enum, wrap
 it: enum("NetControl::DROP").
 
-    # Zeek event declaration:
-    # global ev: event(c: count);
+```python
+# Zeek event declaration:
+# global ev: event(c: count);
+from zeekpy import Zeek, count
 
-    with Zeek("ws://127.0.0.1:27759/v1/messages/json") as zeek:
-        zeek.publish("/the/topic/", "ev", [count(42)])
-
+with Zeek("ws://127.0.0.1:27759/v1/messages/json") as zeek:
+    zeek.publish("/the/topic/", "ev", [count(42)])
+```
 
 Type Conversions
 ----------------
@@ -81,37 +87,46 @@ to instantiate and populate instances based on the listed fields. For &optional,
 use typing.Optional or the type | None notation. A fairly complex example of a
 vector of records containing optional fields follows:
 
-    # Zeek type and event declaration:
-    # type R: {
-    #     c: count;
-    #     a: addr;
-    #     oa: addr &optional;
-    #     f: double &optional;
-    # }
-    #
-    # global ev: event(rvec: vector of R);
-    from zeekpy import Zeek, addr, count
+```python
+# Zeek type and event declaration:
+# type R: {
+#     c: count;
+#     a: addr;
+#     oa: addr &optional;
+#     f: double &optional;
+# }
+#
+# global ev: event(rvec: vector of R);
+from zeekpy import Zeek, addr, count
 
+# Python type declaration for R.
+@dataclasses.dataclass
+class R:
+    c: count
+    a: addr
+    oa: addr | None = None
+    f: float | None = None
 
-    # Python type declaration for R.
-    @dataclasses.dataclass
-    class R:
-        c: count
-        a: addr
-        oa: addr | None = None
-        f: float | None = None
+# Usage
+zeek = Zeek(...)
 
+@zeek.on("ev")
+def ev(rvec: list[R]):
+    pass
 
-    # Usage
-    zeek = Zeek(...)
+with zeek:
+    zeek.consume()
+```
 
-    @zeek.on("ev")
-    def ev(rvec: list[R]):
-        pass
+Note on Types
+-------------
 
-    with zeek:
-        zeek.consume()
-
+If you look at the types listed in the EventArg union, you'll find a mix of native
+Zeek and native Python types. This is on purpose. The rough rule is that the native
+Python type is used when there's a direct mapping possible (bool, datetime, list,
+float, str, dataclasses). Otherwise, when there's no direct mapping (addr, subnet),
+it's just a tagged Python type (count, enum), or the port type that's really a
+composite type.
 
 Sets and Tables
 ---------------

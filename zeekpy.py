@@ -455,7 +455,7 @@ class Zeek:
             return
 
         if self.ws is None:
-            raise RuntimeError("missing connect")
+            raise RuntimeError("missing enter")
 
         msg = json.dumps(data)
         self.ws.send(msg)
