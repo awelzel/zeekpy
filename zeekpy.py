@@ -296,11 +296,18 @@ def convert_zeek_to_py(th: typing.Any, arg: RawArg) -> EventArg:
             return values
         elif typ_origin is types.UnionType or typ_origin is typing.Union:
             # Handle union types for optional fields types (t, None) uniontype
-            candidates = [t for t in typ_args if t is not types.NoneType]
-            if len(candidates) == 1:
-                return convert_zeek_to_py(candidates[0], arg)
+            candidates = {t for t in typ_args if t is not types.NoneType}
 
-    raise NotImplementedError(th)
+            if len(candidates) == 1:
+                return convert_zeek_to_py(candidates.pop(), arg)
+            elif candidates == {ipaddress.IPv4Network, ipaddress.IPv6Network}:
+                return convert_zeek_to_py(subnet, arg)
+            elif candidates == {ipaddress.IPv4Address, ipaddress.IPv6Address}:
+                return convert_zeek_to_py(addr, arg)
+
+            raise NotImplementedError(typ_origin, typ_args, arg)
+
+    raise NotImplementedError(th, arg)
 
 
 def convert_event_args_for(

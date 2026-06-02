@@ -70,6 +70,27 @@ with Zeek("ws://127.0.0.1:27759/v1/messages/json") as zeek:
     zeek.publish("/the/topic/", "ev", [count(42)])
 ```
 
+It's okay to publish from within event handlers, replying to every ping
+event with a pong event could looks as follows:
+
+```python
+from zeekpy import Zeek, count
+
+zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/pings/"])
+
+@zeek.on("ping")
+def handle_ping(c: count):
+    print("got ping, sending pong", c)
+    zeek.publish("/pongs/", "pong", [c])
+
+with zeek:
+    zeek.consume()
+```
+
+Event handlers are executed by the thread blocked in consume(), so the publish()
+is done in the context of that thread. You can also call zeek.publish() from a
+different thread.
+
 Type Conversions
 ----------------
 

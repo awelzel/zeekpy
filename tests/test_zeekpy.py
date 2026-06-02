@@ -163,3 +163,69 @@ class Test(unittest.TestCase):
         assert self.r
         self.assertEqual(self.r.c1, 4242)
         self.assertEqual(self.r.c2, 4711)
+
+    def test_typing_optional_addr(self):
+        """
+        There was a bug with optional addr when using TypeAlias.
+        """
+
+        @dataclasses.dataclass
+        class R:
+            a1: addr
+            a2: typing.Optional[addr] = None
+
+        self.r: R | None = None
+
+        @self.zeek.on("ev")
+        def ev(r: R):
+            self.r = r
+
+        # R is represented as a vector of fields
+        data1 = [
+            {
+                "@data-type": "vector",
+                "data": [
+                    {"@data-type": "address", "data": "192.168.0.1"},
+                    {"@data-type": "address", "data": "192.168.0.2"},
+                ],
+            },
+        ]
+
+        self.zeek.dispatch("/topic", "ev", data1)
+        self.assertIsNotNone(self.r)
+        assert self.r
+        self.assertEqual(str(self.r.a1), "192.168.0.1")
+        self.assertEqual(str(self.r.a2), "192.168.0.2")
+
+    def test_typing_optional_subnet(self):
+        """
+        There was a bug with optional subnet when using TypeAlias.
+        """
+
+        @dataclasses.dataclass
+        class R:
+            a1: subnet
+            a2: subnet | None = None
+
+        self.r: R | None = None
+
+        @self.zeek.on("ev")
+        def ev(r: R):
+            self.r = r
+
+        # R is represented as a vector of fields
+        data1 = [
+            {
+                "@data-type": "vector",
+                "data": [
+                    {"@data-type": "subnet", "data": "192.168.0.0/16"},
+                    {"@data-type": "subnet", "data": "10.0.0.0/8"},
+                ],
+            },
+        ]
+
+        self.zeek.dispatch("/topic", "ev", data1)
+        self.assertIsNotNone(self.r)
+        assert self.r
+        self.assertEqual(str(self.r.a1), "192.168.0.0/16")
+        self.assertEqual(str(self.r.a2), "10.0.0.0/8")
