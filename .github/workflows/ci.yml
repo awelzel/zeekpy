@@ -7,7 +7,11 @@ permissions:
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+    tags:
+      - v*
+
 
 jobs:
   ruff:
@@ -61,7 +65,7 @@ jobs:
         path: dist/
 
   publish-to-pypi:
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    if: startsWith(github.ref, 'refs/tags/v')  # only publish to PyPI on tag pushes
     needs:
     - build
     - ruff
