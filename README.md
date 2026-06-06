@@ -1,9 +1,8 @@
 zeekpy
 ======
 
-A little pure Python and async-less library for consuming and publishing
-Zeek events via Zeek's WebSocket API, leveraging Python type annotations
-for conversion purposes.
+Pure Python library for consuming and publishing events via Zeek's WebSocket
+API heavily using type hints.
 
 Usage
 -----
@@ -158,9 +157,34 @@ yourself from the dict. Zeek's support for composite keys makes this cumbersome
 and the use cases aren't clear. It could technically make sense to allow composite
 keys using tuples, e.g., set[tuple[int, str]].
 
+Async Support
+-------------
+
+The zeekpy module contains an AsyncZeek class that mirrors the Zeek class.
+You use async with and await to work with it. It's otherwise very similar
+to the Zeek class. Not that you'll get concurrent event handler invocation.
+
+```python
+import asyncio
+from zeekpy import AsyncZeek, count
+
+zeek = AsyncZeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/pings/"])
+
+@zeek.on("ping")
+async def handle_ping(c: count):
+    print("got ping, sending pong", c)
+    await zeek.publish("/pongs/", "pong", [c])
+
+async def main():
+    async with zeek:
+        await zeek.consume()
+
+asyncio.run(main())
+```
+
+
 Note
 ----
 
 The context manager, consume() and stop() approach might be a bit clunky and
-racy, if you have better ideas, feel free to fix it up or fork a version that
-uses async. There's no plan for this code to support async.
+racy, if you have better ideas, feel free to fix it up.

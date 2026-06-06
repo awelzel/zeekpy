@@ -2,6 +2,7 @@
 zeekpy
 """
 
+import asyncio
 import collections
 import dataclasses
 import datetime
@@ -15,6 +16,10 @@ import threading
 import types
 import typing
 
+from websockets.asyncio.client import (
+    ClientConnection as AsyncClientConnection,
+    connect as async_connect,
+)
 from websockets.sync.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 from websockets.frames import CloseCode
@@ -67,7 +72,8 @@ EventArg: typing.TypeAlias = typing.Union[
 ]
 
 EventArgs: typing.TypeAlias = list[EventArg]
-EventHandler: typing.TypeAlias = typing.Callable[..., None]
+AsyncEventHandler = typing.Callable[..., typing.Awaitable[None]]
+EventHandler: typing.TypeAlias = typing.Callable[..., None] | AsyncEventHandler
 
 
 class Error(Exception): ...
@@ -352,16 +358,7 @@ class HandlerInfo:
         self.signature = inspect.signature(handler)
 
 
-class Zeek:
-    """
-    A synchronous and thread-safe event emitter to interact with Zeek using
-    the websockets library.
-
-    Register event handlers using on() method.
-
-    Publish events to Zeek using publish().
-    """
-
+class ZeekBase:
     def __init__(
         self,
         uri: str | None = None,
@@ -369,7 +366,7 @@ class Zeek:
         topics: list[str] | None = None,
         app_name: str | None = None,
         timeout: float | None = 10.0,
-        ws: None | ClientConnection = None,
+        ws: None | AsyncClientConnection | ClientConnection = None,
     ) -> None:
         if uri is None:
             uri = os.getenv("ZEEK_URI", "ws://127.0.0.1:27759/v1/messages/json")
@@ -422,22 +419,8 @@ class Zeek:
         """
         LOGGER.warning("unhandled event %s on topic %s", name, topic)
 
-    def dispatch(self, topic: str, name: str, args: RawArgs):
-        """
-        Find a matching handler and convert args recursively to the requested
-        types, then invoke the handler.
-        """
-        if name in self.handlers:
-            for h in self.handlers[name]:
-                converted_args = convert_event_args_for(h, args)
-                h.handler(*converted_args)
-        else:
-            self.unknown_event(topic, name, args)
-
-    def publish(self, topic: str, name: str, args: EventArgs):
-        """
-        Construct and publish and event.
-        """
+    def _serialize_publish(self, topic: str, name: str, args: EventArgs):
+        """ """
         zargs = [convert_py_to_zeek(a) for a in args]
 
         data = {
@@ -458,14 +441,36 @@ class Zeek:
             ],
         }
 
-        if self._stop.is_set():
-            return
+        return json.dumps(data)
 
-        if self.ws is None:
-            raise RuntimeError("missing enter")
 
-        msg = json.dumps(data)
-        self.ws.send(msg)
+class Zeek(ZeekBase):
+    """
+    Synchronous Zeek client.
+
+        zeek = Zeek()
+
+        @zeek.on("ping")
+        def ping(c: count):
+            zeek.publish("/pongs", "pong", [c])
+
+        with zeek:
+            zeek.consume()
+    """
+
+    ws: ClientConnection
+
+    def dispatch(self, topic: str, name: str, args: RawArgs):
+        """
+        Find a matching handler and convert args recursively to the requested
+        types, then invoke the handler.
+        """
+        if name in self.handlers:
+            for h in self.handlers[name]:
+                converted_args = convert_event_args_for(h, args)
+                h.handler(*converted_args)
+        else:
+            self.unknown_event(topic, name, args)
 
     def stop(self, exc_val: Exception | None = None):
         """
@@ -511,12 +516,12 @@ class Zeek:
 
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc, tb):
         if self.ws is not None:
             self._stop.set()
 
             code = CloseCode.NORMAL_CLOSURE
-            if exc_val is not None:
+            if exc is not None:
                 code = CloseCode.INTERNAL_ERROR
 
             self.ws.close(code=code)
@@ -525,6 +530,20 @@ class Zeek:
             self.ws.recv_events_thread.join()
 
             self.ws = None
+
+    def publish(self, topic: str, name: str, args: EventArgs):
+        """
+        Construct and publish and event.
+        """
+        msg = self._serialize_publish(topic, name, args)
+
+        if self._stop.is_set():
+            return
+
+        if self.ws is None:
+            raise RuntimeError("missing enter")
+
+        self.ws.send(msg)
 
     def consume(self, timeout: float | None = None):
         """
@@ -557,3 +576,96 @@ class Zeek:
 
         if self._stop_exc_val:
             raise self._stop_exc_val from None
+
+
+class AsyncZeek(ZeekBase):
+    """
+    Asynchronous Zeek client.
+
+        zeek = AsyncZeek()
+
+        @zeek.on("ping")
+        async def ping(c: count):
+            await zeek.publish("/pongs", "pong", [c])
+
+        async with zeek:
+            await zeek.consume()
+    """
+
+    ws: AsyncClientConnection
+
+    async def __aenter__(self) -> "AsyncZeek":
+        additional_headers = {}
+        if self.app_name:
+            additional_headers["X-Application-Name"] = self.app_name
+
+        self.ws = await async_connect(
+            self.uri,
+            open_timeout=self.timeout,
+            close_timeout=self.timeout,
+            additional_headers=additional_headers,
+        )
+
+        await self.ws.send(json.dumps(self.topics))
+        msg = await asyncio.wait_for(self.ws.recv(), timeout=self.timeout)
+        ack = json.loads(msg)
+        if ack.get("type") != "ack" or "endpoint" not in ack or "version" not in ack:
+            raise Error("bad ack received", ack)
+
+        self.endpoint = ack["endpoint"]
+        self.version = ack["version"]
+
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        code = CloseCode.NORMAL_CLOSURE
+
+        # Use INTERNAL_ERROR when the exception isn't asyncio's CancelledError.
+        if exc is not None and exc_type is not asyncio.exceptions.CancelledError:
+            code = CloseCode.INTERNAL_ERROR
+
+        await self.ws.close(code=code)
+
+    async def dispatch(self, topic: str, name: str, args: RawArgs):
+        if name in self.handlers:
+            for h in self.handlers[name]:
+                converted_args = convert_event_args_for(h, args)
+                result = h.handler(*converted_args)
+                if inspect.isawaitable(result):
+                    await result
+        else:
+            self.unknown_event(topic, name, args)
+
+    async def publish(self, topic: str, name: str, args: EventArgs):
+        """
+        Asynchronously publish an event.
+        """
+        msg = self._serialize_publish(topic, name, args)
+
+        await self.ws.send(msg)
+
+    async def consume(self):
+        """
+        Asynchronously consuming.
+        """
+        if self.ws is None:
+            raise RuntimeError("missing __enter__")
+
+        while True:
+            try:
+                msg = await self.ws.recv()
+                topic, name, args = load_json_msg(msg)
+                await self.dispatch(topic, name, args)
+            except ConnectionClosedOK:
+                # If the server spuriously closed the connection, re-raise
+                # the ConnectionClosedOK exception.
+                if not self._stop.is_set():
+                    raise
+            except ConnectionClosedError:
+                # If stop() got passed an exception, ignore
+                # ConnectionClosedError exceptions, otherwise
+                # re-raise it for the user to decide.
+                if self._stop_exc_val is not None:
+                    break
+
+                raise
