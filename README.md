@@ -8,15 +8,15 @@ Usage
 -----
 
 You construct a zeekpy.Zeek object, passing it the WebSocket URI of the Zeek
-cluster to connect to and the optional topics to which to subscribe to.
-The WebSocket connection and Zeek handshake is done when entering the Zeek
+cluster to connect to and the optional topics to which you want to subscribe.
+The WebSocket connection and Zeek handshake are done when entering the Zeek
 object's context manager:
 
 ```python
 zeek = Zeek("ws://127.0.0.1:27759/v1/messages/json", topics=["/test/"])
 
 with zeek:
-    # Now connected to Zeek and subscribed to /test/test
+    # Now connected to Zeek and subscribed to /test/
     ...
 ```
 
@@ -57,7 +57,7 @@ If an argument is a dict and has only "@data-type" and "data" keys, it is used
 directly in the JSON payload. To publish a Python int as a Zeek count, you need
 to wrap the int in a count instance: count(42). Otherwise, the 42 would be encoded
 as an integer. This is similar to the ZeekJS BigInt case. Similarly, for enum,
-the library treats an enum like a str. For publishing a string as enum, wrap
+the library treats an enum like a str. For publishing a string as an enum, wrap
 it: enum("NetControl::DROP").
 
 ```python
@@ -70,7 +70,7 @@ with Zeek("ws://127.0.0.1:27759/v1/messages/json") as zeek:
 ```
 
 It's okay to publish from within event handlers, replying to every ping
-event with a pong event could looks as follows:
+event with a pong event looks as follows:
 
 ```python
 from zeekpy import Zeek, count
@@ -99,13 +99,13 @@ also annotate such parameters with RawArg to make this behavior explicit.
 
 When you annotate a parameter with addr, the handler function will receive
 either an ipaddress.IPv4Address or ipaddress.IPv6Address as produced by
-ipaddress.ip_address(). Similarly for subnet. When annotating a parameter with
+ipaddress.ip_address(). The same applies to subnet. When annotating a parameter with
 port, the result will be an object that has two fields: port (int) and proto (str).
 
-For records, use dataclasses.dataclass and types. The implementation knows how
-to instantiate and populate instances based on the listed fields. For &optional,
-use typing.Optional or the type | None notation. A fairly complex example of a
-vector of records containing optional fields follows:
+For records, use dataclasses.dataclass and standard type hints. The implementation
+knows how to instantiate and populate instances based on the listed fields.
+For &optional, use typing.Optional or the type | None notation. A fairly complex
+example of a vector of records containing optional fields follows:
 
 ```python
 # Zeek type and event declaration:
@@ -153,16 +153,19 @@ Sets and Tables
 
 Sets and tables are not implemented. The author doesn't think it's a good idea
 to use them for remote events. Annotate them with RawArg and convert them
-yourself from the dict. Zeek's support for composite keys makes this cumbersome
-and the use cases aren't clear. It could technically make sense to allow composite
-keys using tuples, e.g., set[tuple[int, str]].
+yourself from the raw dictionary. Zeek's support for composite keys makes this
+cumbersome and the use cases aren't clear. It could technically make sense to
+allow composite keys using tuples, e.g., set[tuple[int, str]]. Feel free top
+open a PR if you need this.
 
 Async Support
 -------------
 
 The zeekpy module contains an AsyncZeek class that mirrors the Zeek class.
 You use async with and await to work with it. It's otherwise very similar
-to the Zeek class. Not that you'll get concurrent event handler invocation.
+to the Zeek class. Not that you'll get concurrent event handler invocations
+when handlers use await for IO which will change execution order and may be
+confusing. Only use if you're comfortable writing async code.
 
 ```python
 import asyncio
@@ -182,9 +185,9 @@ async def main():
 asyncio.run(main())
 ```
 
+Contributing
+------------
 
-Note
-----
-
-The context manager, consume() and stop() approach might be a bit clunky and
-racy, if you have better ideas, feel free to fix it up.
+The context manager is used to connect and disconnect properly and consume()
+and stop() to cancel. If you find edge cases or bugs here, feel free to open
+PRs to improve this logic.

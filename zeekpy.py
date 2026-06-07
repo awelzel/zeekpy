@@ -458,7 +458,7 @@ class Zeek(ZeekBase):
             zeek.consume()
     """
 
-    ws: ClientConnection
+    ws: ClientConnection | None
 
     def dispatch(self, topic: str, name: str, args: RawArgs):
         """
@@ -471,25 +471,6 @@ class Zeek(ZeekBase):
                 h.handler(*converted_args)
         else:
             self.unknown_event(topic, name, args)
-
-    def stop(self, exc_val: Exception | None = None):
-        """
-        Stop a running consume() and close the WebSocket connection.
-        If exc_val is provided, consume() will raise it.
-        """
-        if self._stop.is_set():
-            return
-
-        if self.ws is not None:
-            code = CloseCode.NORMAL_CLOSURE
-            if exc_val is not None:
-                self._stop_exc_val = exc_val
-                code = CloseCode.INTERNAL_ERROR
-
-            # Shutdown Connection.
-            self.ws.close(code=code)
-
-        self._stop.set()
 
     def __enter__(self) -> "Zeek":
         if self.ws is not None:
@@ -577,6 +558,25 @@ class Zeek(ZeekBase):
         if self._stop_exc_val:
             raise self._stop_exc_val from None
 
+    def stop(self, exc_val: Exception | None = None):
+        """
+        Stop a running consume() and close the WebSocket connection.
+        If exc_val is provided, consume() will raise it.
+        """
+        if self._stop.is_set():
+            return
+
+        self._stop.set()
+
+        if self.ws is not None:
+            code = CloseCode.NORMAL_CLOSURE
+            if exc_val is not None:
+                self._stop_exc_val = exc_val
+                code = CloseCode.INTERNAL_ERROR
+
+            # Shutdown Connection.
+            self.ws.close(code=code)
+
 
 class AsyncZeek(ZeekBase):
     """
@@ -592,7 +592,7 @@ class AsyncZeek(ZeekBase):
             await zeek.consume()
     """
 
-    ws: AsyncClientConnection
+    ws: AsyncClientConnection | None
 
     async def __aenter__(self) -> "AsyncZeek":
         additional_headers = {}
@@ -618,21 +618,28 @@ class AsyncZeek(ZeekBase):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        code = CloseCode.NORMAL_CLOSURE
 
-        # Use INTERNAL_ERROR when the exception isn't asyncio's CancelledError.
-        if exc is not None and exc_type is not asyncio.exceptions.CancelledError:
-            code = CloseCode.INTERNAL_ERROR
+        if self.ws is not None:
+            self._stop.set()
+            code = CloseCode.NORMAL_CLOSURE
 
-        await self.ws.close(code=code)
+            # Use INTERNAL_ERROR when the exception isn't asyncio's CancelledError.
+            if exc is not None and exc_type is not asyncio.exceptions.CancelledError:
+                code = CloseCode.INTERNAL_ERROR
+
+            await self.ws.close(code=code)
+
+            self.ws = None
 
     async def dispatch(self, topic: str, name: str, args: RawArgs):
         if name in self.handlers:
             for h in self.handlers[name]:
                 converted_args = convert_event_args_for(h, args)
                 result = h.handler(*converted_args)
-                if inspect.isawaitable(result):
-                    await result
+                if inspect.iscoroutine(result):
+                    # if the handler is async and returned a coro,
+                    # create a task from it rather than awaiting.
+                    asyncio.create_task(result)
         else:
             self.unknown_event(topic, name, args)
 
@@ -640,8 +647,10 @@ class AsyncZeek(ZeekBase):
         """
         Asynchronously publish an event.
         """
-        msg = self._serialize_publish(topic, name, args)
+        if self.ws is None:
+            raise RuntimeError("missing enter")
 
+        msg = self._serialize_publish(topic, name, args)
         await self.ws.send(msg)
 
     async def consume(self):
@@ -669,3 +678,27 @@ class AsyncZeek(ZeekBase):
                     break
 
                 raise
+
+            if self._stop.is_set():
+                break
+
+        if self._stop_exc_val:
+            raise self._stop_exc_val from None
+
+    async def stop(self, exc_val: Exception | None = None):
+        """
+        Stop the loop by closing.
+        """
+        if self._stop.is_set():
+            return
+
+        self._stop.set()
+
+        if self.ws is not None:
+            code = CloseCode.NORMAL_CLOSURE
+            if exc_val is not None:
+                self._stop_exc_val = exc_val
+                code = CloseCode.INTERNAL_ERROR
+
+            # Shutdown Connection.
+            await self.ws.close(code=code)
