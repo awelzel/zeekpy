@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zeekpy"
 dynamic = ["version"]
-description = "Async-less library for consuming and publishing events via Zeek's WebSocket API"
+description = "Pure Python library for consuming and publishing events via Zeek's WebSocket API heavily using type hints"
 readme = "README.md"
 license = "BSD-3-Clause"
 requires-python = ">=3.11"
