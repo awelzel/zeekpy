@@ -4,6 +4,10 @@ zeekpy
 Pure Python library for consuming and publishing events via Zeek's WebSocket
 API heavily using type hints.
 
+> This library isn't an official Zeek project. It's an exploration of
+> an alternative Python binding API for Zeek and inspired primarily by
+> [ZeekJS](https://github.com/corelight/zeekjs) and [FastAPI](https://github.com/fastapi/fastapi).
+
 Usage
 -----
 
@@ -188,6 +192,28 @@ asyncio.run(main())
 Contributing
 ------------
 
+Contributions are welcome. Keep it simple.
+
 The context manager is used to connect and disconnect properly and consume()
-and stop() to cancel. If you find edge cases or bugs here, feel free to open
-PRs to improve this logic.
+and stop() to cancel. If you find edge cases or bugs in that area, feel free
+to open PRs to improve this logic, I'm not an asyncio expert.
+
+After committing changes, run the following commands to verify everything
+is still working and looks good:
+
+```bash
+uv run ruff check
+All checks passed!
+
+uv run ruff format
+11 files left unchanged
+
+uv run ruff check
+All checks passed!
+
+uv run pytest
+...
+```
+
+If ``zeek`` is in your PATH, integration tests against a live
+Zeek WebSocket will be executed, otherwise they're skipped.

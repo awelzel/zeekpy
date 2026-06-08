@@ -1,5 +1,8 @@
 """
 zeekpy
+
+Pure Python library for consuming and publishing events via Zeek's WebSocket
+API heavily using type hints.
 """
 
 import asyncio
