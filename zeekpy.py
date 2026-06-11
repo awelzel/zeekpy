@@ -24,7 +24,11 @@ from websockets.asyncio.client import (
     connect as async_connect,
 )
 from websockets.sync.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
+from websockets.exceptions import (
+    ConnectionClosed,
+    ConnectionClosedOK,
+    ConnectionClosedError,
+)
 from websockets.frames import CloseCode
 
 
@@ -390,6 +394,9 @@ class ZeekBase:
         # Exception as passed from stop()
         self._stop_exc_val: Exception | None = None
 
+        # Currently consuming? Used for sanity checks.
+        self._consuming = False
+
         self.handlers: dict[str, list[HandlerInfo]] = collections.defaultdict(list)
 
     def on(self, name: str, handler: None | EventHandler = None):
@@ -501,6 +508,9 @@ class Zeek(ZeekBase):
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self._consuming:
+            raise RuntimeError("__exit__ while consuming")
+
         if self.ws is not None:
             self._stop.set()
 
@@ -508,10 +518,38 @@ class Zeek(ZeekBase):
             if exc is not None:
                 code = CloseCode.INTERNAL_ERROR
 
-            self.ws.close(code=code)
+            # Start a short-lived thread to drain the receive side
+            # messages until the connection is closed. If we don't
+            # do this and a lot of messages are queued, we won't ever
+            # see the close frame as it cannot send it to us. In
+            # __exit__, we aren't consuming anymore, so just discard
+            # all the messages.
+            def __drain(ws: ClientConnection):
+                while True:
+                    try:
+                        _ = ws.recv()
+                    except ConnectionClosed:
+                        break
+                    except Exception:
+                        LOGGER.exception("drain exception")
+                        break
+
+            drain_thread = threading.Thread(target=__drain, args=(self.ws,))
+            drain_thread.start()
+
+            try:
+                self.ws.close(code=code)
+            except Exception:
+                LOGGER.exception("close exception in __exit__")
+            finally:
+                drain_thread.join(timeout=self.timeout)
+                if drain_thread.is_alive():
+                    LOGGER.error("failed to join drain thread")
 
             # Join the receive thread.
-            self.ws.recv_events_thread.join()
+            self.ws.recv_events_thread.join(timeout=self.timeout)
+            if self.ws.recv_events_thread.is_alive():
+                LOGGER.error("failed to join recv_events thread")
 
             self.ws = None
 
@@ -536,27 +574,32 @@ class Zeek(ZeekBase):
         if self.ws is None:
             raise RuntimeError("missing __enter__")
 
-        while True:
-            try:
-                msg = self.ws.recv(timeout=timeout, decode=False)
-                topic, name, args = load_json_msg(msg)
-                self.dispatch(topic, name, args)
-            except ConnectionClosedOK:
-                # If the server spuriously closed the connection, re-raise
-                # the ConnectionClosedOK exception.
-                if not self._stop.is_set():
+        try:
+            self._consuming = True
+
+            while True:
+                try:
+                    msg = self.ws.recv(timeout=timeout, decode=False)
+                    topic, name, args = load_json_msg(msg)
+                    self.dispatch(topic, name, args)
+                except ConnectionClosedOK:
+                    # If the server spuriously closed the connection, re-raise
+                    # the ConnectionClosedOK exception.
+                    if not self._stop.is_set():
+                        raise
+                except ConnectionClosedError:
+                    # If stop() got passed an exception, ignore
+                    # ConnectionClosedError exceptions, otherwise
+                    # re-raise it for the user to decide.
+                    if self._stop_exc_val is not None:
+                        break
+
                     raise
-            except ConnectionClosedError:
-                # If stop() got passed an exception, ignore
-                # ConnectionClosedError exceptions, otherwise
-                # re-raise it for the user to decide.
-                if self._stop_exc_val is not None:
+
+                if self._stop.is_set():
                     break
-
-                raise
-
-            if self._stop.is_set():
-                break
+        finally:
+            self._consuming = False
 
         if self._stop_exc_val:
             raise self._stop_exc_val from None
@@ -621,6 +664,8 @@ class AsyncZeek(ZeekBase):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
+        if self._consuming:
+            raise RuntimeError("__aexit__ while consuming")
 
         if self.ws is not None:
             self._stop.set()
@@ -663,27 +708,31 @@ class AsyncZeek(ZeekBase):
         if self.ws is None:
             raise RuntimeError("missing __enter__")
 
-        while True:
-            try:
-                msg = await self.ws.recv()
-                topic, name, args = load_json_msg(msg)
-                await self.dispatch(topic, name, args)
-            except ConnectionClosedOK:
-                # If the server spuriously closed the connection, re-raise
-                # the ConnectionClosedOK exception.
-                if not self._stop.is_set():
+        try:
+            self._consuming = True
+            while True:
+                try:
+                    msg = await self.ws.recv()
+                    topic, name, args = load_json_msg(msg)
+                    await self.dispatch(topic, name, args)
+                except ConnectionClosedOK:
+                    # If the server spuriously closed the connection, re-raise
+                    # the ConnectionClosedOK exception.
+                    if not self._stop.is_set():
+                        raise
+                except ConnectionClosedError:
+                    # If stop() got passed an exception, ignore
+                    # ConnectionClosedError exceptions, otherwise
+                    # re-raise it for the user to decide.
+                    if self._stop_exc_val is not None:
+                        break
+
                     raise
-            except ConnectionClosedError:
-                # If stop() got passed an exception, ignore
-                # ConnectionClosedError exceptions, otherwise
-                # re-raise it for the user to decide.
-                if self._stop_exc_val is not None:
+
+                if self._stop.is_set():
                     break
-
-                raise
-
-            if self._stop.is_set():
-                break
+        finally:
+            self._consuming = False
 
         if self._stop_exc_val:
             raise self._stop_exc_val from None
