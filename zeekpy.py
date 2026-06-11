@@ -675,7 +675,36 @@ class AsyncZeek(ZeekBase):
             if exc is not None and exc_type is not asyncio.exceptions.CancelledError:
                 code = CloseCode.INTERNAL_ERROR
 
-            await self.ws.close(code=code)
+            # Start a short-lived task to drain the receive side. Same
+            # motivation as for the non-async version. ws.close() may
+            # hang if too many messages are queued and the server cannot
+            # get the close frame to us.
+            async def __drain(ws: AsyncClientConnection):
+                while True:
+                    try:
+                        _ = await ws.recv()
+                    except ConnectionClosed:
+                        break
+                    except Exception:
+                        LOGGER.exception("drain exception")
+                        break
+
+            drain_task = asyncio.create_task(__drain(self.ws))
+
+            try:
+                await self.ws.close(code=code)
+            except Exception:
+                LOGGER.exception("close exception in __aexit__")
+            finally:
+                try:
+                    await asyncio.wait_for(drain_task, timeout=self.timeout)
+                except asyncio.TimeoutError:
+                    LOGGER.error("failed to wait for drain task")
+                    drain_task.cancel()
+                    try:
+                        await drain_task
+                    except Exception:
+                        LOGGER.exception("await drain_task exception in __aexit__")
 
             self.ws = None
 
