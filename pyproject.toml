@@ -20,6 +20,9 @@ dev = [
     "ruff>=0.16.3",
 ]
 
+[tool.ruff.format]
+exclude = ["*.md"]
+
 [tool.setuptools]
 py-modules = ["zeekpy"]
 
