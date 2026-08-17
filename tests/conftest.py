@@ -63,9 +63,9 @@ def zeek_websocket_server(request):
             try:
                 s.connect((ws_listen_addr, ws_listen_port))
                 break
-            except socket.error as e:
+            except OSError as e:
                 if i == (tries - 1):
-                    raise Exception("failed to start zeek") from e
+                    raise TimeoutError("failed to start zeek") from e
 
                 time.sleep(sleep_s)
 

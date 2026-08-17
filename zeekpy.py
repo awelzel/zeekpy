@@ -19,18 +19,15 @@ import threading
 import types
 import typing
 
-from websockets.asyncio.client import (
-    ClientConnection as AsyncClientConnection,
-    connect as async_connect,
-)
-from websockets.sync.client import ClientConnection, connect
+from websockets.asyncio.client import ClientConnection as AsyncClientConnection
+from websockets.asyncio.client import connect as async_connect
 from websockets.exceptions import (
     ConnectionClosed,
-    ConnectionClosedOK,
     ConnectionClosedError,
+    ConnectionClosedOK,
 )
 from websockets.frames import CloseCode
-
+from websockets.sync.client import ClientConnection, connect
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,8 +39,8 @@ RawArgs: typing.TypeAlias = list[RawArg]
 
 
 # Zeek specific type hints.
-subnet: typing.TypeAlias = ipaddress.IPv4Network | ipaddress.IPv6Network
-addr: typing.TypeAlias = ipaddress.IPv4Address | ipaddress.IPv6Address
+subnet: typing.TypeAlias = ipaddress.IPv4Network | ipaddress.IPv6Network  # noqa: PYI042
+addr: typing.TypeAlias = ipaddress.IPv4Address | ipaddress.IPv6Address  # noqa: PYI042
 
 
 class count(int):
@@ -61,7 +58,7 @@ class port(typing.NamedTuple):
     proto: str
 
 
-EventArg: typing.TypeAlias = typing.Union[
+EventArg: typing.TypeAlias = typing.Union[  # noqa: UP007
     None,
     RawArg,
     addr,
@@ -91,11 +88,11 @@ class Error(Exception): ...
 
 __all__ = [
     "AsyncZeek",
-    "Zeek",
     "Error",
     "EventArg",
     "EventHandler",
     "RawArg",
+    "Zeek",
     "addr",
     "count",
     "enum",
@@ -109,11 +106,7 @@ def load_json_msg(buf: bytes | str) -> tuple[str, str, RawArgs]:
     Given a raw WebSocket message, unpack it into topic, event name and
     args. args is just the Python list and dict objects from the parsed JSON.
     """
-    try:
-        msg = json.loads(buf)
-    except ValueError:
-        # Invalid JSON?
-        raise
+    msg = json.loads(buf)
 
     try:
         ty, topic, data = msg.pop("type"), msg.pop("topic"), msg.pop("data")
@@ -286,9 +279,7 @@ def convert_zeek_to_py(th: typing.Any, arg: RawArg) -> EventArg:
     elif th is datetime.datetime:
         if arg["@data-type"] != "timestamp":
             raise ValueError(arg)
-        return datetime.datetime.fromisoformat(arg["data"]).astimezone(
-            datetime.timezone.utc
-        )
+        return datetime.datetime.fromisoformat(arg["data"]).astimezone(datetime.UTC)
     elif th is datetime.timedelta:
         if arg["@data-type"] != "timespan" or not isinstance(arg["data"], str):
             raise ValueError(arg)
@@ -475,7 +466,9 @@ class ZeekBase:
         LOGGER.warning("unhandled event %s on topic %s", name, topic)
 
     def _serialize_publish(self, topic: str, name: str, args: EventArgs):
-        """ """
+        """
+        Serialize an event as Broker's WebSocket v1 format.
+        """
         zargs = [convert_py_to_zeek(a) for a in args]
 
         data = {
@@ -527,7 +520,7 @@ class Zeek(ZeekBase):
         else:
             self.unknown_event(topic, name, args)
 
-    def __enter__(self) -> "Zeek":
+    def __enter__(self) -> typing.Self:
         if self.ws is not None:
             raise RuntimeError("double enter")
 
@@ -685,7 +678,7 @@ class AsyncZeek(ZeekBase):
 
     ws: AsyncClientConnection | None
 
-    async def __aenter__(self) -> "AsyncZeek":
+    async def __aenter__(self) -> typing.Self:
         additional_headers = {}
         if self.app_name:
             additional_headers["X-Application-Name"] = self.app_name
@@ -743,7 +736,7 @@ class AsyncZeek(ZeekBase):
             finally:
                 try:
                     await asyncio.wait_for(drain_task, timeout=self.timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     LOGGER.error("failed to wait for drain task")
                     drain_task.cancel()
                     try:

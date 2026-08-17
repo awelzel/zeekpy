@@ -1,7 +1,6 @@
-from datetime import datetime, timedelta
 import dataclasses
+from datetime import datetime, timedelta
 from ipaddress import IPv4Address, IPv4Network
-import typing
 
 from zeekpy import RawArg, Zeek, addr, count, enum, port, subnet
 
@@ -116,7 +115,7 @@ def test_typing_optional(zeek):
     @dataclasses.dataclass
     class R:
         c1: count
-        c2: typing.Optional[count] = None
+        c2: count | None = None
 
     ev_r: R | None = None
 
@@ -169,7 +168,7 @@ def test_typing_optional_addr(zeek):
     @dataclasses.dataclass
     class R:
         a1: addr
-        a2: typing.Optional[addr] = None
+        a2: addr | None = None
 
     ev_r: R | None = None
 
@@ -375,7 +374,7 @@ def test_table_multi_index_and_record(zeek):
     @dataclasses.dataclass
     class R:
         a1: addr
-        a2: typing.Optional[addr] = None
+        a2: addr | None = None
 
     data1 = [
         {

@@ -35,11 +35,11 @@ def test_set_ping_pong(zeek_websocket_server):
 
     @zeek.on("test::zeekpy::set_pong")
     def pong_handler(s: set[tuple[count, int, str]]):
-        assert s == set([(count(42), 43, "44"), (count(45), 46, "47")])
+        assert s == {(count(42), 43, "44"), (count(45), 46, "47")}
         zeek.stop()
 
     with zeek:
-        s = set([(count(42), 43, "44"), (count(45), 46, "47")])
+        s = {(count(42), 43, "44"), (count(45), 46, "47")}
         zeek.publish("zeekpy.test.ping", "test::zeekpy::set_ping", [s])
         zeek.consume()
 
