@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import dataclasses
+from ipaddress import IPv4Address, IPv4Network
 import typing
 
 from zeekpy import RawArg, Zeek, addr, count, enum, port, subnet
@@ -228,3 +229,206 @@ def test_typing_optional_subnet(zeek):
     assert ev_r is not None
     assert str(ev_r.a1) == "192.168.0.0/16"
     assert str(ev_r.a2) == "10.0.0.0/8"
+
+
+def test_set_single_index(zeek):
+    data1 = [
+        {
+            "@data-type": "set",
+            "data": [
+                {"@data-type": "subnet", "data": "192.168.0.0/16"},
+                {"@data-type": "subnet", "data": "10.0.0.0/8"},
+            ],
+        },
+    ]
+
+    ev_nets: set[subnet] | None = None
+
+    @zeek.on("ev")
+    def ev(nets: set[subnet]):
+        nonlocal ev_nets
+        ev_nets = nets
+
+    zeek.dispatch("/topic", "ev", data1)
+
+    assert ev_nets is not None
+    assert len(ev_nets) == 2
+    assert IPv4Network("192.168.0.0/16") in ev_nets
+    assert IPv4Network("10.0.0.0/8") in ev_nets
+
+
+def test_set_multi_index(zeek):
+    data1 = [
+        {
+            "@data-type": "set",
+            "data": [
+                {
+                    "@data-type": "vector",
+                    "data": [
+                        {"@data-type": "subnet", "data": "192.168.0.0/16"},
+                        {"@data-type": "subnet", "data": "10.0.0.0/8"},
+                    ],
+                },
+                {
+                    "@data-type": "vector",
+                    "data": [
+                        {"@data-type": "subnet", "data": "10.0.1.0/24"},
+                        {"@data-type": "subnet", "data": "10.0.2.0/24"},
+                    ],
+                },
+            ],
+        },
+    ]
+
+    ev_nets: set[tuple[subnet, subnet]] | None = None
+
+    @zeek.on("ev")
+    def ev(nets: set[tuple[subnet, subnet]]):
+        nonlocal ev_nets
+        ev_nets = nets
+
+    zeek.dispatch("/topic", "ev", data1)
+
+    assert ev_nets is not None
+    assert len(ev_nets) == 2
+    assert (IPv4Network("192.168.0.0/16"), IPv4Network("10.0.0.0/8")) in ev_nets
+    assert (IPv4Network("10.0.1.0/24"), IPv4Network("10.0.2.0/24")) in ev_nets
+
+
+def test_table_single_index(zeek):
+    data1 = [
+        {
+            "@data-type": "table",
+            "data": [
+                {
+                    "key": {"@data-type": "string", "data": "first-name"},
+                    "value": {"@data-type": "string", "data": "John"},
+                },
+                {
+                    "key": {"@data-type": "string", "data": "last-name"},
+                    "value": {"@data-type": "string", "data": "Doe"},
+                },
+            ],
+        }
+    ]
+
+    ev_tbl: dict[str, str] | None = None
+
+    @zeek.on("ev")
+    def ev(tbl: dict[str, str]):
+        nonlocal ev_tbl
+        ev_tbl = tbl
+
+    zeek.dispatch("/topic", "ev", data1)
+
+    assert ev_tbl is not None
+    assert {"first-name": "John", "last-name": "Doe"} == ev_tbl
+
+
+def test_table_multi_index(zeek):
+    data1 = [
+        {
+            "@data-type": "table",
+            "data": [
+                {
+                    "key": {
+                        "@data-type": "vector",
+                        "data": [
+                            {"@data-type": "string", "data": "first-name"},
+                            {"@data-type": "count", "data": 42},
+                        ],
+                    },
+                    "value": {"@data-type": "string", "data": "John"},
+                },
+                {
+                    "key": {
+                        "@data-type": "vector",
+                        "data": [
+                            {"@data-type": "string", "data": "last-name"},
+                            {"@data-type": "count", "data": 4711},
+                        ],
+                    },
+                    "value": {"@data-type": "string", "data": "Doe"},
+                },
+            ],
+        }
+    ]
+
+    ev_tbl: dict[tuple[str, count], str] | None = None
+
+    @zeek.on("ev")
+    def ev(tbl: dict[tuple[str, count], str]):
+        nonlocal ev_tbl
+        ev_tbl = tbl
+
+    zeek.dispatch("/topic", "ev", data1)
+
+    assert ev_tbl is not None
+    assert {
+        ("first-name", count(42)): "John",
+        ("last-name", count(4711)): "Doe",
+    } == ev_tbl
+
+
+def test_table_multi_index_and_record(zeek):
+
+    @dataclasses.dataclass
+    class R:
+        a1: addr
+        a2: typing.Optional[addr] = None
+
+    data1 = [
+        {
+            "@data-type": "table",
+            "data": [
+                {
+                    "key": {
+                        "@data-type": "vector",
+                        "data": [
+                            {"@data-type": "string", "data": "s42"},
+                            {"@data-type": "count", "data": 42},
+                        ],
+                    },
+                    "value": {
+                        "@data-type": "vector",
+                        "data": [
+                            {"@data-type": "address", "data": "192.168.0.1"},
+                            {"@data-type": "address", "data": "192.168.0.2"},
+                        ],
+                    },
+                },
+                {
+                    "key": {
+                        "@data-type": "vector",
+                        "data": [
+                            {"@data-type": "string", "data": "s4711"},
+                            {"@data-type": "count", "data": 4711},
+                        ],
+                    },
+                    "value": {
+                        "@data-type": "vector",
+                        "data": [
+                            {"@data-type": "address", "data": "192.168.0.1"},
+                            {"@data-type": "none"},
+                        ],
+                    },
+                },
+            ],
+        }
+    ]
+
+    # table[string, count] of R
+    ev_tbl: dict[tuple[str, count], R] | None = None
+
+    @zeek.on("ev")
+    def ev(tbl: dict[tuple[str, count], R]):
+        nonlocal ev_tbl
+        ev_tbl = tbl
+
+    zeek.dispatch("/topic", "ev", data1)
+
+    assert ev_tbl is not None
+    assert {
+        ("s42", count(42)): R(IPv4Address("192.168.0.1"), IPv4Address("192.168.0.2")),
+        ("s4711", count(4711)): R(IPv4Address("192.168.0.1"), None),
+    } == ev_tbl

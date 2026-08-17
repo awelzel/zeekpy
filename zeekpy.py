@@ -76,6 +76,9 @@ EventArg: typing.TypeAlias = typing.Union[
     port,
     str,
     subnet,
+    set,
+    tuple,
+    dict,
 ]
 
 EventArgs: typing.TypeAlias = list[EventArg]
@@ -87,10 +90,11 @@ class Error(Exception): ...
 
 
 __all__ = [
+    "AsyncZeek",
     "Zeek",
+    "Error",
     "EventArg",
     "EventHandler",
-    "Error",
     "RawArg",
     "addr",
     "count",
@@ -197,14 +201,28 @@ def convert_py_to_zeek(arg: EventArg) -> RawArg:
         if dataclasses.is_dataclass(arg):
             dt = "vector"
             d = [convert_py_to_zeek(a) for a in dataclasses.astuple(arg)]
-        elif isinstance(arg, dict) and arg.keys() == {"@data-type", "data"}:
-            # This is a dict that contains @data-type and data? Just pass
-            # it through. This happens when RawArg is used.
-            return arg
-        else:
-            # Assume it's a list otherwise.
+        elif isinstance(arg, set):
+            dt = "set"
+            d = [convert_py_to_zeek(a) for a in arg]
+        elif isinstance(arg, dict):
+            if arg.keys() == {"@data-type", "data"}:
+                # This is a dict that contains @data-type and data?
+                # Just pass it through. This happens when RawArg is used.
+                return arg
+            # Encode as table.
+            dt = "table"
+            d = []
+            for k, v in arg.items():
+                key = convert_py_to_zeek(k)
+                value = convert_py_to_zeek(v)
+                d.append({"key": key, "value": value})
+        elif isinstance(arg, tuple):
             dt = "vector"
-            assert isinstance(arg, list)  # please type check
+            d = [convert_py_to_zeek(a) for a in arg]
+        else:
+            # Assume it's a list or a tuple otherwise.
+            dt = "vector"
+            assert isinstance(arg, list), repr(arg)  # please type check
             d = [convert_py_to_zeek(e) for e in arg]
 
     assert dt, arg
@@ -306,6 +324,33 @@ def convert_zeek_to_py(th: typing.Any, arg: RawArg) -> EventArg:
             values = []
             for a in arg["data"]:
                 values.append(convert_zeek_to_py(typ_args[0], a))
+            return values
+        elif typ_origin is tuple:  # Only internal for set and table
+            if arg["@data-type"] != "vector":
+                raise ValueError(arg)
+            if len(arg["data"]) != len(typ_args):
+                raise TypeError(arg, typ_args)
+            typed_args = zip(typ_args, arg["data"])
+            return tuple(convert_zeek_to_py(t, a) for (t, a) in typed_args)
+        elif typ_origin is set:
+            if arg["@data-type"] != "set":
+                raise ValueError(arg)
+            if len(typ_args) != 1:  # We could support multi-index via a tuple?
+                raise TypeError(arg)
+            values = set()
+            for a in arg["data"]:
+                values.add(convert_zeek_to_py(typ_args[0], a))
+            return values
+        elif typ_origin is dict:
+            if arg["@data-type"] != "table":
+                raise ValueError(arg)
+            if len(typ_args) != 2:  # Could do this during registration?
+                raise TypeError(arg)
+            values = {}
+            for a in arg["data"]:
+                key = convert_zeek_to_py(typ_args[0], a["key"])
+                value = convert_zeek_to_py(typ_args[1], a["value"])
+                values[key] = value
             return values
         elif typ_origin is types.UnionType or typ_origin is typing.Union:
             # Handle union types for optional fields types (t, None) uniontype

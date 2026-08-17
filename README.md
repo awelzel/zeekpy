@@ -136,7 +136,7 @@ zeek = Zeek(...)
 
 @zeek.on("ev")
 def ev(rvec: list[R]):
-    pass
+    ...
 
 with zeek:
     zeek.consume()
@@ -155,12 +155,42 @@ composite type.
 Sets and Tables
 ---------------
 
-Sets and tables are not implemented. The author doesn't think it's a good idea
-to use them for remote events. Annotate them with RawArg and convert them
-yourself from the raw dictionary. Zeek's support for composite keys makes this
-cumbersome and the use cases aren't clear. It could technically make sense to
-allow composite keys using tuples, e.g., set[tuple[int, str]]. Feel free top
-open a PR if you need this.
+Sets and tables using single indices on the Zeek side can use simple
+``set`` and ``dict`` type annotations. For example:
+
+```python
+@zeek.on("ev_set")
+def ev(s: set[subnet]):
+    ...
+
+@zeek.on("ev_tbl")
+def ev(tbl: dict[subnet, str]):
+    ...
+```
+
+For composite keys, put the keys into a ``tuple``:
+
+```python
+@zeek.on("ev_set")
+def ev(s: set[tuple[addr, addr]]):
+    ...
+
+@zeek.on("ev_tbl")
+def ev(tbl: dict[tuple[count, str], str]):
+    ...
+```
+
+To publish a multi-index table, construct a ``dict`` containing tuples
+as keys:
+
+```python
+with zeek:
+    tbl = {
+        (count(42), 43, "44"): count(4711),
+        (count(45), 46, "47"): count(4712),
+    }
+    zeek.publish("/tbl_ping/", "tbl_ping", [tbl])
+```
 
 Async Support
 -------------
