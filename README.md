@@ -142,6 +142,55 @@ with zeek:
     zeek.consume()
 ```
 
+Support for sets and tables works by annotating parameters or fields
+with set or dict. For single-key indices, this is straightforward:
+
+```python
+# Handles event ev_set(s: set[subnet])
+@zeek.on("ev_set")
+def ev(s: set[subnet]):
+    ...
+
+# Handles event ev_tbl(t: table[subnet] of string)
+@zeek.on("ev_tbl")
+def ev(tbl: dict[subnet, str]):
+    ...
+```
+
+For composite keys, use an explicit tuple to specify all types of the
+composite index.
+
+```python
+# Handles event ev_set(s: set[addr, addr])
+@zeek.on("ev_set")
+def ev(s: set[tuple[addr, addr]]):
+    ...
+
+# Handles event ev_tbl(t: table[count, string] of string)
+@zeek.on("ev_tbl")
+def ev(tbl: dict[tuple[count, str], str]):
+    ...
+```
+
+To publish a table or set with a composite key, construct a dict or set
+containing tuples of atomic typs as the keys:
+
+```python
+with zeek:
+    # publish for event tbl_ping(t: table[count, int, string] of count)
+    tbl = {
+        (count(42), 43, "44"): count(4711),
+        (count(45), 46, "47"): count(4712),
+    }
+    zeek.publish("/tbl_ping/", "tbl_ping", [tbl])
+```
+
+This should work for most use-cases, assuming atomic index types are used.
+Python does not allow use of mutable and non-hashable types as set or dict
+keys. If you have a need for this, you can always annotate a parameter with
+RawArg and pick the original WebSocket JSON payload apart yourself.
+
+
 Note on Types
 -------------
 
@@ -151,46 +200,6 @@ Python type is used when there's a direct mapping possible (bool, datetime, list
 float, str, dataclasses). Otherwise, when there's no direct mapping (addr, subnet),
 it's just a tagged Python type (count, enum), or the port type that's really a
 composite type.
-
-Sets and Tables
----------------
-
-Sets and tables using single indices on the Zeek side can use simple
-``set`` and ``dict`` type annotations. For example:
-
-```python
-@zeek.on("ev_set")
-def ev(s: set[subnet]):
-    ...
-
-@zeek.on("ev_tbl")
-def ev(tbl: dict[subnet, str]):
-    ...
-```
-
-For composite keys, put the keys into a ``tuple``:
-
-```python
-@zeek.on("ev_set")
-def ev(s: set[tuple[addr, addr]]):
-    ...
-
-@zeek.on("ev_tbl")
-def ev(tbl: dict[tuple[count, str], str]):
-    ...
-```
-
-To publish a multi-index table, construct a ``dict`` containing tuples
-as keys:
-
-```python
-with zeek:
-    tbl = {
-        (count(42), 43, "44"): count(4711),
-        (count(45), 46, "47"): count(4712),
-    }
-    zeek.publish("/tbl_ping/", "tbl_ping", [tbl])
-```
 
 Async Support
 -------------
